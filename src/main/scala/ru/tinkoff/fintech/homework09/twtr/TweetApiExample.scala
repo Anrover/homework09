@@ -4,9 +4,11 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
 import scala.concurrent.duration._
 import java.time.Instant
+import java.util.{Timer, TimerTask}
 import java.util.UUID.randomUUID
 
 import scala.concurrent.Future
+import scala.util.Try
 
 /**
   * Вам необходимо реализовать api для создания твиттов, получения твитта и лайка твитта
@@ -50,19 +52,23 @@ case class CreateTweetRequest(text: String, user: String)
 case class GetTweetRequest(id: String)
 case class LikeRequest(id: String)
 
+
 object FutureTimeout {
-
-  import scala.concurrent.ExecutionContext.Implicits.global
-
   implicit class FutureTimeoutLike[T](f: Future[Result[T]]) {
-    def withTimeout(ms: Long): Future[Result[T]] = Future.firstCompletedOf(List(f, Future {
-      blocking {
-        Thread.sleep(ms)
-      }
-      Error("The time to access the server is out")
-    }))
+    lazy val withTimeout: Future[Result[T]] = withTimeout(2000)
 
-    val withTimeout: Future[Result[T]] = withTimeout(2000)
+    def withTimeout(ms: Long): Future[Result[T]] = {
+      val promise = Promise[Result[T]]()
+      val timerTask = new TimerTask {
+        override def run(): Unit = {
+          promise.complete(Try(Error("The time to access the server is out")))
+        }
+      }
+      new Timer(true).schedule(timerTask, ms)
+      val combinedFut = Future.firstCompletedOf(List(f, promise.future))
+      f.onComplete(_ => timerTask.cancel())
+      combinedFut
+    }
   }
 }
 
